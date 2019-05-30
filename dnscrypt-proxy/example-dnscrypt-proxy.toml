@@ -41,6 +41,14 @@ listen_addresses = ['127.0.0.1:53', '[::1]:53']
 max_clients = 250
 
 
+## Switch to a different system user after listening sockets have been created.
+## Note (1): this feature is currently unsupported on Windows.
+## Note (2): this feature is not compatible with systemd socket activation.
+## Note (3): when using -pidfile, the PID file directory must be writable by the new user
+
+# user_name = 'nobody'
+
+
 ## Require servers (from static + remote sources) to satisfy specific properties
 
 # Use servers reachable over IPv4
@@ -67,11 +75,30 @@ require_nolog = true
 # Server must not enforce its own blacklist (for parental control, ads blocking...)
 require_nofilter = true
 
+# Server names to avoid even if they match all criteria
+disabled_server_names = []
 
 
-## Always use TCP to connect to upstream servers
+## Always use TCP to connect to upstream servers.
+## This can be useful if you need to route everything through Tor.
+## Otherwise, leave this to `false`, as it doesn't improve security
+## (dnscrypt-proxy will always encrypt everything even using UDP), and can
+## only increase latency.
 
 force_tcp = false
+
+
+## SOCKS proxy
+## Uncomment the following line to route all TCP connections to a local Tor node
+## Tor doesn't support UDP, so set `force_tcp` to `true` as well.
+
+# proxy = "socks5://127.0.0.1:9050"
+
+
+## HTTP/HTTPS proxy
+## Only for DoH servers
+
+# http_proxy = "http://127.0.0.1:8888"
 
 
 ## How long a DNS query will wait for a response, in milliseconds
@@ -82,6 +109,13 @@ timeout = 2500
 ## Keepalive for HTTP (HTTPS, HTTP/2) queries, in seconds
 
 keepalive = 30
+
+
+## Use the REFUSED return code for blocked responses
+## Setting this to `false` means that some responses will be lies.
+## Unfortunately, `false` appears to be required for Android 8+
+
+refused_code_in_responses = false
 
 
 ## Load-balancing strategy: 'p2' (default), 'ph', 'fastest' or 'random'
@@ -131,7 +165,7 @@ cert_refresh_delay = 240
 ## the following suite improves performance.
 ## This may also help on Intel CPUs running 32-bit operating systems.
 ##
-## Delete or comment the next line if you have issues fetching sources or
+## Keep tls_cipher_suite empty if you have issues fetching sources or
 ## connecting to some DoH servers. Google and Cloudflare are fine with it.
 
 # tls_cipher_suite = [52392, 49199]
@@ -154,10 +188,26 @@ cert_refresh_delay = 240
 fallback_resolver = '9.9.9.9:53'
 
 
-## Never try to use the system DNS settings; unconditionally use the
-## fallback resolver.
+## Never let dnscrypt-proxy try to use the system DNS settings;
+## unconditionally use the fallback resolver.
 
 ignore_system_dns = false
+
+
+## Maximum time (in seconds) to wait for network connectivity before
+## initializing the proxy.
+## Useful if the proxy is automatically started at boot, and network
+## connectivity is not guaranteed to be immediately available.
+## Use 0 to not test for connectivity at all,
+## and -1 to wait as much as possible.
+netprobe_timeout = 60
+
+
+## Offline mode - Do not use any remote encrypted servers.
+## The proxy will remain fully functional to respond to queries that
+## plugins can handle directly (forwarding, cloaking, ...)
+
+# offline_mode = false
 
 
 ## Automatic log files rotation
@@ -179,8 +229,9 @@ log_files_max_backups = 1
 
 ## Immediately respond to IPv6-related queries with an empty response
 ## This makes things faster when there is no IPv6 connectivity, but can
-## also cause reliability issues with some stub resolvers. In
-## particular, enabling this on macOS is not recommended.
+## also cause reliability issues with some stub resolvers.
+## Do not enable if you added a validating resolver such as dnsmasq in front
+## of the proxy.
 
 block_ipv6 = false
 
@@ -238,9 +289,14 @@ cache_min_ttl = 600
 cache_max_ttl = 86400
 
 
-## TTL for negatively cached entries
+## Minimum TTL for negatively cached entries
 
-cache_neg_ttl = 60
+cache_neg_min_ttl = 60
+
+
+## Maximum TTL for negatively cached entries
+
+cache_neg_max_ttl = 600
 
 
 
@@ -445,6 +501,15 @@ cache_neg_ttl = 60
   minisign_key = 'RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3'
   refresh_delay = 72
   prefix = ''
+
+  ## Quad9 over DNSCrypt - https://quad9.net/
+
+  # [sources.quad9-resolvers]
+  # urls = ["https://www.quad9.net/quad9-resolvers.md"]
+  # minisign_key = "RWQBphd2+f6eiAqBsvDZEBXBGHQBJfeG6G+wJPPKxCZMoEQYpmoysKUN"
+  # cache_file = "quad9-resolvers.md"
+  # refresh_delay = 72
+  # prefix = "quad9-"
 
   ## Another example source, with resolvers censoring some websites not appropriate for children
   ## This is a subset of the `public-resolvers` list, so enabling both is useless

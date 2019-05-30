@@ -1,21 +1,26 @@
-[![Build Status](https://travis-ci.org/jedisct1/dnscrypt-proxy.svg?branch=master)](https://travis-ci.org/jedisct1/dnscrypt-proxy?branch=master)
+# ![dnscrypt-proxy 2](https://raw.github.com/jedisct1/dnscrypt-proxy/master/logo.png?3)
 
-# ![dnscrypt-proxy 2](https://raw.github.com/jedisct1/dnscrypt-proxy/master/logo.png?2)
+[![DNSCrypt-Proxy Release](https://img.shields.io/github/release/jedisct1/dnscrypt-proxy.svg?label=Latest%20Release&style=popout)](https://github.com/jedisct1/dnscrypt-proxy/releases/latest)  [![Build Status](https://travis-ci.org/jedisct1/dnscrypt-proxy.svg?branch=master)](https://travis-ci.org/jedisct1/dnscrypt-proxy?branch=master) [![#dnscrypt-proxy:matrix.org](https://img.shields.io/matrix/dnscrypt-proxy:matrix.org.svg?label=DNSCrypt-Proxy%20Matrix%20Chat&server_fqdn=matrix.org&style=popout)](https://matrix.to/#/#dnscrypt-proxy:matrix.org)
 
-A flexible DNS proxy, with support for modern encrypted DNS protocols such as [DNSCrypt v2](https://dnscrypt.info/protocol) and [DNS-over-HTTP](https://tools.ietf.org/html/draft-ietf-doh-dns-over-https-05).
+## Overview
 
-## [dnscrypt-proxy 2.0.9 final is available for download!](https://github.com/jedisct1/dnscrypt-proxy/releases/latest)
+A flexible DNS proxy, with support for modern encrypted DNS protocols such as [DNSCrypt v2](https://dnscrypt.info/protocol) and [DNS-over-HTTPS](https://www.rfc-editor.org/rfc/rfc8484.txt).
 
 * [dnscrypt-proxy documentation](https://dnscrypt.info/doc) – This project's documentation (Wiki)
 * [DNSCrypt project home page](https://dnscrypt.info/)
-* [DNS-over-HTTP/2 and DNSCrypt resolvers](https://dnscrypt.info/public-servers)
+* [DNS-over-HTTPS and DNSCrypt resolvers](https://dnscrypt.info/public-servers)
 * [Server and client implementations](https://dnscrypt.info/implementations)
 * [DNS stamps](https://dnscrypt.info/stamps)
 * [FAQ](https://dnscrypt.info/faq)
 
+## [Download the latest release](https://github.com/jedisct1/dnscrypt-proxy/releases/latest)
+
+Available as source code and pre-built binaries for most operating
+systems and architectures (see below).
+
 ## Features
 
-* DNS traffic encryption and authentication. Supports DNS-over-HTTPS (DoH) and DNSCrypt.
+* DNS traffic encryption and authentication. Supports DNS-over-HTTPS (DoH) using TLS 1.3, and DNSCrypt.
 * DNS query monitoring, with separate log files for regular and suspicious queries
 * Filtering: block ads, malware, and other unwanted content. Compatible with all DNS services
 * Time-based filtering, with a flexible weekly schedule
@@ -25,10 +30,9 @@ A flexible DNS proxy, with support for modern encrypted DNS protocols such as [D
 * Load balancing: pick a set of resolvers, dnscrypt-proxy will automatically measure and keep track of their speed, and balance the traffic across the fastest available ones.
 * Cloaking: like a `HOSTS` file on steroids, that can return preconfigured addresses for specific names, or resolve and return the IP address of other names. This can be used for local development as well as to enforce safe search results on Google, Yahoo and Bing.
 * Automatic background updates of resolvers lists
-* Can force outgoing connections to use TCP; useful with tunnels such as Tor.
+* Can force outgoing connections to use TCP
+* Supports SOCKS proxies
 * Compatible with DNSSEC
-
-It includes all the major features from dnscrypt-proxy 1.9.5, with improved reliability, flexibility, usability and performance.
 
 ## Pre-built binaries
 
@@ -57,3 +61,5 @@ Up-to-date, pre-built binaries are available for:
 * OpenBSD/x86_64
 * Windows
 * Windows 64 bit
+
+How to use these files, as well as how to verify their signatures, are documented in the [installation instructions](https://github.com/jedisct1/dnscrypt-proxy/wiki/installation).

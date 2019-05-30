@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/jedisct1/dlog"
 	"github.com/miekg/dns"
@@ -21,8 +22,38 @@ const (
 
 type PluginsGlobals struct {
 	sync.RWMutex
-	queryPlugins    *[]Plugin
-	responsePlugins *[]Plugin
+	queryPlugins           *[]Plugin
+	responsePlugins        *[]Plugin
+	loggingPlugins         *[]Plugin
+	refusedCodeInResponses bool
+}
+
+type PluginsReturnCode int
+
+const (
+	PluginsReturnCodePass = iota
+	PluginsReturnCodeForward
+	PluginsReturnCodeDrop
+	PluginsReturnCodeReject
+	PluginsReturnCodeSynth
+	PluginsReturnCodeParseError
+	PluginsReturnCodeNXDomain
+	PluginsReturnCodeResponseError
+	PluginsReturnCodeServerError
+	PluginsReturnCodeCloak
+)
+
+var PluginsReturnCodeToString = map[PluginsReturnCode]string{
+	PluginsReturnCodePass:          "PASS",
+	PluginsReturnCodeForward:       "FORWARD",
+	PluginsReturnCodeDrop:          "DROP",
+	PluginsReturnCodeReject:        "REJECT",
+	PluginsReturnCodeSynth:         "SYNTH",
+	PluginsReturnCodeParseError:    "PARSE_ERROR",
+	PluginsReturnCodeNXDomain:      "NXDOMAIN",
+	PluginsReturnCodeResponseError: "RESPONSE_ERROR",
+	PluginsReturnCodeServerError:   "SERVER_ERROR",
+	PluginsReturnCodeCloak:         "CLOAK",
 }
 
 type PluginsState struct {
@@ -35,16 +66,19 @@ type PluginsState struct {
 	synthResponse          *dns.Msg
 	dnssec                 bool
 	cacheSize              int
-	cacheNegTTL            uint32
+	cacheNegMinTTL         uint32
+	cacheNegMaxTTL         uint32
 	cacheMinTTL            uint32
 	cacheMaxTTL            uint32
+	questionMsg            *dns.Msg
+	requestStart           time.Time
+	requestEnd             time.Time
+	cacheHit               bool
+	returnCode             PluginsReturnCode
 }
 
 func InitPluginsGlobals(pluginsGlobals *PluginsGlobals, proxy *Proxy) error {
 	queryPlugins := &[]Plugin{}
-	if len(proxy.queryLogFile) != 0 {
-		*queryPlugins = append(*queryPlugins, Plugin(new(PluginQueryLog)))
-	}
 	if len(proxy.whitelistNameFile) != 0 {
 		*queryPlugins = append(*queryPlugins, Plugin(new(PluginWhitelistName)))
 	}
@@ -75,6 +109,12 @@ func InitPluginsGlobals(pluginsGlobals *PluginsGlobals, proxy *Proxy) error {
 	if proxy.cache {
 		*responsePlugins = append(*responsePlugins, Plugin(new(PluginCacheResponse)))
 	}
+
+	loggingPlugins := &[]Plugin{}
+	if len(proxy.queryLogFile) != 0 {
+		*loggingPlugins = append(*loggingPlugins, Plugin(new(PluginQueryLog)))
+	}
+
 	for _, plugin := range *queryPlugins {
 		if err := plugin.Init(proxy); err != nil {
 			return err
@@ -85,9 +125,16 @@ func InitPluginsGlobals(pluginsGlobals *PluginsGlobals, proxy *Proxy) error {
 			return err
 		}
 	}
+	for _, plugin := range *loggingPlugins {
+		if err := plugin.Init(proxy); err != nil {
+			return err
+		}
+	}
 
 	(*pluginsGlobals).queryPlugins = queryPlugins
 	(*pluginsGlobals).responsePlugins = responsePlugins
+	(*pluginsGlobals).loggingPlugins = loggingPlugins
+	(*pluginsGlobals).refusedCodeInResponses = proxy.refusedCodeInResponses
 	return nil
 }
 
@@ -100,21 +147,24 @@ type Plugin interface {
 	Eval(pluginsState *PluginsState, msg *dns.Msg) error
 }
 
-func NewPluginsState(proxy *Proxy, clientProto string, clientAddr *net.Addr) PluginsState {
+func NewPluginsState(proxy *Proxy, clientProto string, clientAddr *net.Addr, start time.Time) PluginsState {
 	return PluginsState{
 		action:         PluginsActionForward,
 		maxPayloadSize: MaxDNSUDPPacketSize - ResponseOverhead,
 		clientProto:    clientProto,
 		clientAddr:     clientAddr,
 		cacheSize:      proxy.cacheSize,
-		cacheNegTTL:    proxy.cacheNegTTL,
+		cacheNegMinTTL: proxy.cacheNegMinTTL,
+		cacheNegMaxTTL: proxy.cacheNegMaxTTL,
 		cacheMinTTL:    proxy.cacheMinTTL,
 		cacheMaxTTL:    proxy.cacheMaxTTL,
+		questionMsg:    nil,
+		requestStart:   start,
 	}
 }
 
 func (pluginsState *PluginsState) ApplyQueryPlugins(pluginsGlobals *PluginsGlobals, packet []byte) ([]byte, error) {
-	if len(*pluginsGlobals.queryPlugins) == 0 {
+	if len(*pluginsGlobals.queryPlugins) == 0 && len(*pluginsGlobals.loggingPlugins) == 0 {
 		return packet, nil
 	}
 	pluginsState.action = PluginsActionForward
@@ -125,6 +175,7 @@ func (pluginsState *PluginsState) ApplyQueryPlugins(pluginsGlobals *PluginsGloba
 	if len(msg.Question) > 1 {
 		return packet, errors.New("Unexpected number of questions")
 	}
+	pluginsState.questionMsg = &msg
 	pluginsGlobals.RLock()
 	for _, plugin := range *pluginsGlobals.queryPlugins {
 		if ret := plugin.Eval(pluginsState, &msg); ret != nil {
@@ -133,7 +184,7 @@ func (pluginsState *PluginsState) ApplyQueryPlugins(pluginsGlobals *PluginsGloba
 			return packet, ret
 		}
 		if pluginsState.action == PluginsActionReject {
-			synth, err := RefusedResponseFromMessage(&msg)
+			synth, err := RefusedResponseFromMessage(&msg, pluginsGlobals.refusedCodeInResponses)
 			if err != nil {
 				return nil, err
 			}
@@ -152,7 +203,7 @@ func (pluginsState *PluginsState) ApplyQueryPlugins(pluginsGlobals *PluginsGloba
 }
 
 func (pluginsState *PluginsState) ApplyResponsePlugins(pluginsGlobals *PluginsGlobals, packet []byte, ttl *uint32) ([]byte, error) {
-	if len(*pluginsGlobals.responsePlugins) == 0 {
+	if len(*pluginsGlobals.responsePlugins) == 0 && len(*pluginsGlobals.loggingPlugins) == 0 {
 		return packet, nil
 	}
 	pluginsState.action = PluginsActionForward
@@ -163,6 +214,16 @@ func (pluginsState *PluginsState) ApplyResponsePlugins(pluginsGlobals *PluginsGl
 		}
 		return packet, err
 	}
+	switch Rcode(packet) {
+	case dns.RcodeSuccess:
+		pluginsState.returnCode = PluginsReturnCodePass
+	case dns.RcodeNameError:
+		pluginsState.returnCode = PluginsReturnCodeNXDomain
+	case dns.RcodeServerFailure:
+		pluginsState.returnCode = PluginsReturnCodeServerError
+	default:
+		pluginsState.returnCode = PluginsReturnCodeResponseError
+	}
 	pluginsGlobals.RLock()
 	for _, plugin := range *pluginsGlobals.responsePlugins {
 		if ret := plugin.Eval(pluginsState, &msg); ret != nil {
@@ -171,7 +232,7 @@ func (pluginsState *PluginsState) ApplyResponsePlugins(pluginsGlobals *PluginsGl
 			return packet, ret
 		}
 		if pluginsState.action == PluginsActionReject {
-			synth, err := RefusedResponseFromMessage(&msg)
+			synth, err := RefusedResponseFromMessage(&msg, pluginsGlobals.refusedCodeInResponses)
 			if err != nil {
 				return nil, err
 			}
@@ -191,4 +252,24 @@ func (pluginsState *PluginsState) ApplyResponsePlugins(pluginsGlobals *PluginsGl
 		return packet, err
 	}
 	return packet2, nil
+}
+
+func (pluginsState *PluginsState) ApplyLoggingPlugins(pluginsGlobals *PluginsGlobals) error {
+	if len(*pluginsGlobals.loggingPlugins) == 0 {
+		return nil
+	}
+	pluginsState.requestEnd = time.Now()
+	questionMsg := pluginsState.questionMsg
+	if questionMsg == nil || len(questionMsg.Question) > 1 {
+		return errors.New("Unexpected number of questions")
+	}
+	pluginsGlobals.RLock()
+	for _, plugin := range *pluginsGlobals.loggingPlugins {
+		if ret := plugin.Eval(pluginsState, questionMsg); ret != nil {
+			pluginsGlobals.RUnlock()
+			return ret
+		}
+	}
+	pluginsGlobals.RUnlock()
+	return nil
 }

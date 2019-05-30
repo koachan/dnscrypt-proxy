@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"strings"
 	"time"
@@ -31,7 +30,7 @@ func (plugin *PluginBlockName) Description() string {
 
 func (plugin *PluginBlockName) Init(proxy *Proxy) error {
 	dlog.Noticef("Loading the set of blocking rules from [%s]", proxy.blockNameFile)
-	bin, err := ioutil.ReadFile(proxy.blockNameFile)
+	bin, err := ReadTextFile(proxy.blockNameFile)
 	if err != nil {
 		return err
 	}
@@ -103,6 +102,7 @@ func (plugin *PluginBlockName) Eval(pluginsState *PluginsState, msg *dns.Msg) er
 	}
 	if reject {
 		pluginsState.action = PluginsActionReject
+		pluginsState.returnCode = PluginsReturnCodeReject
 		if plugin.logger != nil {
 			var clientIPStr string
 			if pluginsState.clientProto == "udp" {

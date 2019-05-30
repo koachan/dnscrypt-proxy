@@ -31,12 +31,25 @@ func EmptyResponseFromMessage(srcMsg *dns.Msg) (*dns.Msg, error) {
 	return dstMsg, nil
 }
 
-func RefusedResponseFromMessage(srcMsg *dns.Msg) (*dns.Msg, error) {
+func RefusedResponseFromMessage(srcMsg *dns.Msg, refusedCode bool) (*dns.Msg, error) {
 	dstMsg, err := EmptyResponseFromMessage(srcMsg)
 	if err != nil {
 		return dstMsg, err
 	}
-	dstMsg.Rcode = dns.RcodeRefused
+	if refusedCode {
+		dstMsg.Rcode = dns.RcodeRefused
+	} else {
+		dstMsg.Rcode = dns.RcodeSuccess
+		questions := srcMsg.Question
+		if len(questions) > 0 {
+			hinfo := new(dns.HINFO)
+			hinfo.Hdr = dns.RR_Header{Name: questions[0].Name, Rrtype: dns.TypeHINFO,
+				Class: dns.ClassINET, Ttl: 1}
+			hinfo.Cpu = "This query has been locally blocked"
+			hinfo.Os = "by dnscrypt-proxy"
+			dstMsg.Answer = []dns.RR{hinfo}
+		}
+	}
 	return dstMsg, nil
 }
 
@@ -71,18 +84,37 @@ func StripTrailingDot(str string) string {
 	return str
 }
 
-func getMinTTL(msg *dns.Msg, minTTL uint32, maxTTL uint32, negCacheMinTTL uint32) time.Duration {
-	if msg.Rcode != dns.RcodeSuccess || len(msg.Answer) <= 0 {
-		return time.Duration(negCacheMinTTL) * time.Second
+func getMinTTL(msg *dns.Msg, minTTL uint32, maxTTL uint32, cacheNegMinTTL uint32, cacheNegMaxTTL uint32) time.Duration {
+	if (msg.Rcode != dns.RcodeSuccess && msg.Rcode != dns.RcodeNameError) || (len(msg.Answer) <= 0 && len(msg.Ns) <= 0) {
+		return time.Duration(cacheNegMinTTL) * time.Second
 	}
-	ttl := uint32(maxTTL)
-	for _, rr := range msg.Answer {
-		if rr.Header().Ttl < ttl {
-			ttl = rr.Header().Ttl
+	var ttl uint32
+	if msg.Rcode == dns.RcodeSuccess {
+		ttl = uint32(maxTTL)
+	} else {
+		ttl = uint32(cacheNegMaxTTL)
+	}
+	if len(msg.Answer) > 0 {
+		for _, rr := range msg.Answer {
+			if rr.Header().Ttl < ttl {
+				ttl = rr.Header().Ttl
+			}
+		}
+	} else {
+		for _, rr := range msg.Ns {
+			if rr.Header().Ttl < ttl {
+				ttl = rr.Header().Ttl
+			}
 		}
 	}
-	if ttl < minTTL {
-		ttl = minTTL
+	if msg.Rcode == dns.RcodeSuccess {
+		if ttl < minTTL {
+			ttl = minTTL
+		}
+	} else {
+		if ttl < cacheNegMinTTL {
+			ttl = cacheNegMinTTL
+		}
 	}
 	return time.Duration(ttl) * time.Second
 }
@@ -99,6 +131,10 @@ func setMaxTTL(msg *dns.Msg, ttl uint32) {
 		}
 	}
 	for _, rr := range msg.Extra {
+		header := rr.Header()
+		if header.Rrtype == dns.TypeOPT {
+			continue
+		}
 		if ttl < rr.Header().Ttl {
 			rr.Header().Ttl = ttl
 		}
@@ -115,6 +151,10 @@ func updateTTL(msg *dns.Msg, expiration time.Time) {
 		rr.Header().Ttl = ttl
 	}
 	for _, rr := range msg.Extra {
+		header := rr.Header()
+		if header.Rrtype == dns.TypeOPT {
+			continue
+		}
 		rr.Header().Ttl = ttl
 	}
 }

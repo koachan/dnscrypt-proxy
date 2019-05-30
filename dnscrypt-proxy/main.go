@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	AppVersion            = "2.0.9"
+	AppVersion            = "2.0.23"
 	DefaultConfigFileName = "dnscrypt-proxy.toml"
 )
 
@@ -24,6 +24,7 @@ type App struct {
 
 func main() {
 	dlog.Init("dnscrypt-proxy", dlog.SeverityNotice, "DAEMON")
+	os.Setenv("GODEBUG", os.Getenv("GODEBUG")+",tls13=1")
 
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -43,7 +44,7 @@ func main() {
 		dlog.Debug(err)
 	}
 	app.proxy = NewProxy()
-
+	_ = ServiceManagerStartNotify()
 	if err := ConfigLoad(&app.proxy, svcFlag); err != nil {
 		dlog.Fatal(err)
 	}
@@ -83,9 +84,6 @@ func (app *App) Start(service service.Service) error {
 	if err := InitPluginsGlobals(&proxy.pluginsGlobals, proxy); err != nil {
 		dlog.Fatal(err)
 	}
-	if proxy.daemonize {
-		Daemonize()
-	}
 	app.quit = make(chan struct{})
 	app.wg.Add(1)
 	if service != nil {
@@ -99,8 +97,8 @@ func (app *App) Start(service service.Service) error {
 }
 
 func (app *App) AppMain(proxy *Proxy) {
-	proxy.StartProxy()
 	pidfile.Write()
+	proxy.StartProxy()
 	<-app.quit
 	dlog.Notice("Quit signal received...")
 	app.wg.Done()

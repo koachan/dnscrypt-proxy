@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -36,6 +39,11 @@ var (
 	InitialMinQuestionSize = 256
 )
 
+var (
+	FileDescriptors   = make([]*os.File, 0)
+	FileDescriptorNum = 0
+)
+
 func PrefixWithSize(packet []byte) ([]byte, error) {
 	packetLen := len(packet)
 	if packetLen > 0xffff {
@@ -47,7 +55,7 @@ func PrefixWithSize(packet []byte) ([]byte, error) {
 	return packet, nil
 }
 
-func ReadPrefixed(conn *net.TCPConn) ([]byte, error) {
+func ReadPrefixed(conn *net.Conn) ([]byte, error) {
 	buf := make([]byte, 2+MaxDNSPacketSize)
 	packetLength, pos := -1, 0
 	for {
@@ -65,7 +73,7 @@ func ReadPrefixed(conn *net.TCPConn) ([]byte, error) {
 				return buf, errors.New("Packet too short")
 			}
 		}
-		if pos >= 2+packetLength {
+		if packetLength >= 0 && pos >= 2+packetLength {
 			return buf[2 : 2+packetLength], nil
 		}
 	}
@@ -163,4 +171,13 @@ func MemUsage() {
 	fmt.Printf("\tTotalAlloc = %v MiB", m.TotalAlloc/1024/1024)
 	fmt.Printf("\tSys = %v MiB", m.Sys/1024/1024)
 	fmt.Printf("\tNumGC = %v\n", m.NumGC)
+}
+
+func ReadTextFile(filename string) (string, error) {
+	bin, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return "", err
+	}
+	bin = bytes.TrimPrefix(bin, []byte{0xef, 0xbb, 0xbf})
+	return string(bin), nil
 }
